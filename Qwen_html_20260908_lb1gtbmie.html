@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Transactional Outbox — объяснение для Reels</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
+
+:root{
+  --bg:#0E1720;
+  --panel:#16212C;
+  --panel-2:#1B2833;
+  --text:#EDEAE0;
+  --muted:#7C8B9A;
+  --amber:#E7A94C;
+  --rose:#E2636E;
+  --teal:#4FBFA5;
+  --line:rgba(237,234,224,0.18);
+  --grid:rgba(237,234,224,0.045);
+  --head: 'Space Grotesk', sans-serif;
+  --body: 'IBM Plex Sans', sans-serif;
+  --mono: 'IBM Plex Mono', monospace;
+}
+
+*{box-sizing:border-box; margin:0; padding:0;}
+
+html,body{
+  height:100%;
+  background:#070c11;
+  color:var(--text);
+  font-family:var(--body);
+}
+
+.stage{
+  min-height:100dvh;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:20px;
+  background:
+    radial-gradient(ellipse at 30% 20%, rgba(79,191,165,0.06), transparent 55%),
+    radial-gradient(ellipse at 80% 80%, rgba(231,169,76,0.05), transparent 55%),
+    #070c11;
+}
+
+.phone{
+  position:relative;
+  width:min(420px, 92vw);
+  aspect-ratio:9/16;
+  max-height:92vh;
+  background:var(--bg);
+  border-radius:30px;
+  border:1px solid rgba(237,234,224,0.12);
+  box-shadow:0 40px 80px rgba(0,0,0,0.55), inset 0 0 0 6px #05090d;
+  overflow-y:auto;
+  overflow-x:hidden;
+  scroll-snap-type:y mandatory;
+  scrollbar-width:none;
+}
+.phone::-webkit-scrollbar{display:none;}
+
+.phone::before{
+  content:"";
+  position:absolute;
+  top:10px; left:50%; transform:translateX(-50%);
+  width:74px; height:5px; border-radius:3px;
+  background:rgba(237,234,224,0.22);
+  z-index:20;
+}
+
+.dots{
+  position:fixed;
+  right:calc(50% - min(420px,92vw)/2 - 22px);
+  top:50%;
+  transform:translateY(-50%);
+  display:flex;
+  flex-direction:column;
+  gap:7px;
+  z-index:30;
+}
+@media (max-width:700px){
+  .dots{ display:none; }
+}
+.dot{
+  width:5px; height:16px; border-radius:3px;
+  background:rgba(237,234,224,0.18);
+  transition:background .3s ease, height .3s ease;
+}
+.dot.active{ background:var(--amber); height:24px; }
+
+.slide{
+  position:relative;
+  height:100%;
+  width:100%;
+  scroll-snap-align:start;
+  scroll-snap-stop:always;
+  display:flex;
+  flex-direction:column;
+  justify-content:center;
+  gap:22px;
+  padding:56px 26px 42px;
+  background-image:
+    linear-gradient(var(--grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size:24px 24px;
+}
+
+.eyebrow{
+  font-family:var(--mono);
+  font-size:11px;
+  letter-spacing:0.04em;
+  color:var(--muted);
+  opacity:0;
+  transform:translateY(6px);
+  transition:opacity .5s ease, transform .5s ease;
+}
+h1{
+  font-family:var(--head);
+  font-weight:600;
+  font-size:clamp(26px,7vw,32px);
+  line-height:1.15;
+  letter-spacing:-0.01em;
+  opacity:0;
+  transform:translateY(10px);
+  transition:opacity .55s ease, transform .55s ease;
+  transition-delay:.05s;
+}
+.lede{
+  font-size:15px;
+  line-height:1.55;
+  color:#C9D2D9;
+  max-width:32ch;
+  opacity:0;
+  transform:translateY(10px);
+  transition:opacity .55s ease, transform .55s ease;
+  transition-delay:.15s;
+}
+.slide.active .eyebrow,
+.slide.active h1,
+.slide.active .lede{ opacity:1; transform:translateY(0); }
+
+.stagenum{ color:var(--amber); }
+
+/* --- diagram scaffolding --- */
+.diagram{
+  position:relative;
+  flex:1;
+  min-height:0;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
+.node{
+  font-family:var(--mono);
+  font-size:12px;
+  letter-spacing:0.02em;
+  color:var(--text);
+  background:var(--panel);
+  border:1px solid var(--line);
+  padding:10px 14px;
+  text-align:center;
+  min-width:88px;
+  opacity:0;
+  transform:translateY(8px) scale(.96);
+  transition:opacity .45s ease, transform .45s ease, border-color .45s ease, box-shadow .45s ease;
+}
+.slide.active .node{ opacity:1; transform:translateY(0) scale(1); }
+.node small{ display:block; color:var(--muted); font-size:9px; margin-top:3px; letter-spacing:.03em; }
+.node.ok{ }
+.slide.active .node.ok{ border-color:var(--amber); box-shadow:0 0 0 1px rgba(231,169,76,0.25); transition-delay:.5s;}
+.slide.active .node.fail{ border-color:var(--rose); box-shadow:0 0 0 1px rgba(226,99,110,0.3); transition-delay:.7s;}
+
+.svgwrap{ position:absolute; inset:0; width:100%; height:100%; pointer-events:none; }
+.connector{
+  fill:none; stroke:var(--muted); stroke-width:1.4;
+  stroke-dasharray:6 6;
+}
+.connector.draw{
+  stroke-dasharray:400; stroke-dashoffset:400;
+  transition:stroke-dashoffset 1s ease;
+}
+.slide.active .connector.draw{ stroke-dashoffset:0; }
+.connector.amber{ stroke:var(--amber); stroke-dasharray:none; }
+.connector.rose{ stroke:var(--rose); stroke-dasharray:none; }
+.mark{
+  font-family:var(--mono); font-size:18px; opacity:0; transform:scale(.4);
+  transition:opacity .3s ease, transform .3s ease;
+}
+.slide.active .mark.ok{ opacity:1; transform:scale(1); color:var(--amber); transition-delay:1.1s; }
+.slide.active .mark.fail{ opacity:1; transform:scale(1); color:var(--rose); transition-delay:1.3s; }
+
+/* --- bullets --- */
+.bullets{ display:flex; flex-direction:column; gap:14px; }
+.bullet{
+  display:flex; gap:10px; align-items:flex-start;
+  font-size:14.5px; line-height:1.4; color:#D7DEE3;
+  opacity:0; transform:translateX(-8px);
+  transition:opacity .45s ease, transform .45s ease;
+}
+.bullet i{
+  flex:none; width:7px; height:7px; margin-top:6px;
+  background:var(--teal); display:inline-block;
+}
+.slide.active .bullet:nth-child(1){ transition-delay:.15s; opacity:1; transform:none;}
+.slide.active .bullet:nth-child(2){ transition-delay:.35s; opacity:1; transform:none;}
+.slide.active .bullet:nth-child(3){ transition-delay:.55s; opacity:1; transform:none;}
+.slide.active .bullet:nth-child(4){ transition-delay:.75s; opacity:1; transform:none;}
+
+/* --- comparison cards --- */
+.cards{ display:flex; flex-direction:column; gap:12px; }
+.card{
+  background:var(--panel);
+  border:1px solid var(--line);
+  border-left:3px solid var(--muted);
+  padding:14px 16px;
+  opacity:0; transform:translateY(10px);
+  transition:opacity .5s ease, transform .5s ease;
+}
+.slide.active .card:nth-child(1){ transition-delay:.2s; opacity:1; transform:none; border-left-color:var(--amber);}
+.slide.active .card:nth-child(2){ transition-delay:.45s; opacity:1; transform:none; border-left-color:var(--teal);}
+.card h3{ font-family:var(--head); font-size:15px; font-weight:600; margin-bottom:6px; }
+.card p{ font-size:13px; line-height:1.45; color:var(--muted); }
+.card .tag{ font-family:var(--mono); font-size:10px; color:var(--muted); letter-spacing:.03em; }
+
+/* --- last slide --- */
+.cta{
+  font-family:var(--head); font-weight:600; font-size:20px;
+  color:var(--amber);
+  opacity:0; transform:translateY(8px);
+  transition:opacity .5s ease, transform .5s ease; transition-delay:.6s;
+}
+.slide.active .cta{ opacity:1; transform:none; }
+
+.footer-mark{
+  position:absolute; bottom:16px; left:26px; right:26px;
+  font-family:var(--mono); font-size:10px; color:var(--muted);
+  display:flex; justify-content:space-between;
+}
+</style>
+</head>
+<body>
+
+<div class="stage">
+  <div class="phone" id="phone">
+
+    <!-- SLIDE 1 — HOOK -->
+    <section class="slide" data-i="0">
+      <div class="eyebrow">01 / 07</div>
+      <h1>Привязали штрихкод.<br>Другие сервисы не узнали.</h1>
+      <p class="lede">Иногда данные в базе и события в очереди расходятся. Разберёмся, почему — и как это чинят инженеры.</p>
+      <div class="diagram">
+        <svg class="svgwrap" viewBox="0 0 300 220" preserveAspectRatio="xMidYMid meet">
+          <path class="connector draw" d="M150,5 L50,45" />
+          <path class="connector draw" d="M150,5 L250,45" />
+        </svg>
+        <div style="position:relative; width:100%; height:100%;">
+          <div class="node" style="position:absolute; top:14px; left:50%; transform:translate(-50%,0);">ORDER-SERVICE<small>записал заказ</small></div>
+          <div class="node ok" style="position:absolute; top:112px; left:20px;">DB<small>orders</small></div>
+          <div class="node fail" style="position:absolute; top:112px; right:8px;">QUEUE<small>notifications</small></div>
+          <div class="mark ok" style="position:absolute; top:145px; left:60px;">✓</div>
+          <div class="mark fail" style="position:absolute; top:145px; right:54px;">✕</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SLIDE 2 — PROBLEM -->
+    <section class="slide" data-i="1">
+      <div class="eyebrow">02 / 07 · <span class="stagenum">проблема</span></div>
+      <h1>Проблема двойной записи</h1>
+      <p class="lede">Сохранить в базу и отправить событие в брокер — это две разные операции. Общей транзакции у них нет.</p>
+      <div class="bullets">
+        <div class="bullet"><i style="background:var(--amber)"></i>Шаг 1 — привязали полученный из другого сервиса штрихкод к нашему товару. Успех.</div>
+        <div class="bullet"><i style="background:var(--rose)"></i>Шаг 2 — сервис упал перед отправкой в брокер.</div>
+        <div class="bullet"><i style="background:var(--muted)"></i>Итог: штрихкод у товара есть, но никто не узнает.</div>
+        <div class="bullet"><i style="background:var(--muted)"></i>Бывает и наоборот: брокер упал, событие не отправилось.</div>
+      </div>
+    </section>
+
+    <!-- SLIDE 3 — DEFINITION -->
+    <section class="slide" data-i="2">
+      <div class="eyebrow">03 / 07 · <span class="stagenum">решение</span></div>
+      <h1>Transactional Outbox</h1>
+      <p class="lede">Бизнес-данные и событие пишем в одной транзакции — в одну и ту же базу. Либо коммитится всё, либо ничего.</p>
+      <div class="diagram">
+        <svg class="svgwrap" viewBox="0 0 300 220" preserveAspectRatio="xMidYMid meet">
+          <rect x="55" y="30" width="190" height="110" fill="none" stroke="var(--line)" stroke-width="1.2" stroke-dasharray="4 4"/>
+          <path class="connector amber draw" d="M150,1 L150,60"/>
+        </svg>
+        <div style="position:relative; width:100%; height:100%;">
+          <div class="node draw" style="position:absolute; top:180px; left:26px;">ORDERS<small>заказ №482</small></div>
+          <div class="node draw" style="position:absolute; top:180px; right:14px;">OUTBOX<small>order.paid</small></div>
+          <div class="node ok" style="position:absolute; top:46px; left:50%; transform:translate(-50%,0);">COMMIT<small>одна транзакция</small></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SLIDE 4 — RELAY FLOW -->
+    <section class="slide" data-i="3">
+      <div class="eyebrow">04 / 07 · <span class="stagenum">как это работает</span></div>
+      <h1>Событие едет в брокер отдельно</h1>
+      <p class="lede">Message Relay читает таблицу outbox, публикует события в брокер и помечает их отправленными.</p>
+      <div class="diagram">
+        <svg class="svgwrap" viewBox="0 0 300 220" preserveAspectRatio="xMidYMid meet">
+          <path class="connector draw" d="M74,-2 L74,35"/>
+          <path class="connector draw" d="M142,58 L200,58"/>
+        </svg>
+        <div style="position:relative; width:100%; height:100%;">
+          <div class="node" style="position:absolute; top:20px; left:44px;">OUTBOX<small>новая строка</small></div>
+          <div class="node" style="position:absolute; top:118px; left:14px;">RELAY<small>опрашивает / читает лог</small></div>
+          <div class="node ok" style="position:absolute; top:118px; right:8px;">BROKER<small>событие доставлено</small></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SLIDE 5 — WHAT IT SOLVES -->
+    <section class="slide" data-i="4">
+      <div class="eyebrow">05 / 07 · <span class="stagenum">что это даёт</span></div>
+      <h1>Что решает паттерн</h1>
+      <div class="bullets" style="margin-top:6px;">
+        <div class="bullet"><i></i>Данные и событие живут или умирают вместе — атомарно.</div>
+        <div class="bullet"><i></i>Брокер лёг? Событие подождёт в outbox и уйдёт позже.</div>
+        <div class="bullet"><i></i>Гарантия at-least-once: событие не потеряется.</div>
+        <div class="bullet"><i></i>Ретраи безопасны — дубликаты обрабатываются на стороне консьюмера.</div>
+      </div>
+    </section>
+
+    <!-- SLIDE 6 — IMPLEMENTATIONS -->
+    <section class="slide" data-i="5">
+      <div class="eyebrow">06 / 07 · <span class="stagenum">реализации</span></div>
+      <h1>Как это делают на практике</h1>
+      <div class="cards">
+        <div class="card">
+          <span class="tag">POLLING PUBLISHER</span>
+          <h3>Опрос таблицы</h3>
+          <p>Отдельный процесс регулярно опрашивает outbox, публикует новые строки и помечает processed. Просто, без доп. инфраструктуры — но есть задержка и лишняя нагрузка на БД.</p>
+        </div>
+        <div class="card">
+          <span class="tag">CDC · DEBEZIUM</span>
+          <h3>Чтение журнала транзакций</h3>
+          <p>Коннектор читает WAL/binlog базы и ловит новые строки outbox почти мгновенно, не трогая БД лишними запросами. Ниже задержка, но сложнее эксплуатация.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- SLIDE 7 — RECAP -->
+    <section class="slide" data-i="6">
+      <div class="eyebrow">07 / 07 · <span class="stagenum">итог</span></div>
+      <h1>Главное правило</h1>
+      <p class="lede">Пиши событие туда же, где лежат данные. Не туда, где брокер.</p>
+      <div class="cta">Transactional Outbox — простой способ не терять события при сбоях.</div>
+      <div class="footer-mark"><span>outbox pattern</span><span>swipe up ↑</span></div>
+    </section>
+
+  </div>
+  <div class="dots" id="dots"></div>
+</div>
+
+<script>
+const slides = document.querySelectorAll('.slide');
+const dotsWrap = document.getElementById('dots');
+slides.forEach((s,i)=>{
+  const d = document.createElement('div');
+  d.className = 'dot' + (i===0 ? ' active':'');
+  dotsWrap.appendChild(d);
+});
+const dots = document.querySelectorAll('.dot');
+
+const io = new IntersectionObserver((entries)=>{
+  entries.forEach(entry=>{
+    const idx = +entry.target.dataset.i;
+    if(entry.isIntersecting && entry.intersectionRatio > 0.6){
+      entry.target.classList.add('active');
+      dots.forEach((d,i)=>d.classList.toggle('active', i===idx));
+    } else {
+      entry.target.classList.remove('active');
+    }
+  });
+},{ root: document.getElementById('phone'), threshold:[0,0.6,1] });
+
+slides.forEach(s=>io.observe(s));
+</script>
+
+</body>
+</html>
